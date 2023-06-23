@@ -40,19 +40,21 @@ class GridSampler:
         self.total = total
         self.batch = batch
         self.d = dilated
-        self.H = int(math.sqrt(total))
+        self.H = int(math.sqrt(total / 100))
         self.h = int(math.sqrt(batch))
         self.ids = torch.LongTensor(np.arange(self.total))
         self.horizontal_boundary = self.H - (self.h + self.d * (self.h - 1))
         self.vertical_boundary = self.horizontal_boundary * (self.H + 1)
 
     def nextids(self):
+        img_num = np.random.randint(1, 100)
         topleft = np.random.randint(1, self.total)
         while (topleft % self.H > self.horizontal_boundary or topleft > self.vertical_boundary):
             topleft = np.random.randint(1, self.total)
         sampled_start_rays = [i * (self.d + 1) * self.H + topleft for i in range(self.h)]
-        sampled_rays = [i * (self.d + 1) + a for a in sampled_start_rays for i in range(self.h)]
+        sampled_rays = np.array([i * (self.d + 1) + a for a in sampled_start_rays for i in range(self.h)])
         # print(len(sampled_rays))
+        sampled_rays += img_num * self.H ** 2
         return self.ids[sampled_rays]
 # a=GridSampler(49,9,1)
 # a.nextids()
@@ -181,8 +183,8 @@ def reconstruction(args):
     dilated = 4
     allrays, allrgbs = train_dataset.all_rays, train_dataset.all_rgbs
     print(allrays.shape, allrgbs.shape)
-    if not args.ndc_ray:
-        allrays, allrgbs = tensorf.filtering_rays(allrays, allrgbs, bbox_only=True)
+    # if not args.ndc_ray:
+        # allrays, allrgbs = tensorf.filtering_rays(allrays, allrgbs, bbox_only=True)
     # trainingSampler = SimpleSampler(allrays.shape[0], args.batch_size)
     trainingSampler = GridSampler(allrays.shape[0], args.batch_size, dilated) #GridSampler로 교체
 
@@ -197,12 +199,12 @@ def reconstruction(args):
 
     pbar = tqdm(range(args.n_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
     for iteration in pbar:
-
-
         ray_idx = trainingSampler.nextids()
         # print(ray_idx)
         # print(ray_idx.shape)
         rays_train, rgb_train = allrays[ray_idx], allrgbs[ray_idx].to(device)
+
+        import matplotlib.pyplot as plt
 
         #rgb_map, alphas_map, depth_map, weights, uncertainty
         rgb_map, alphas_map, depth_map, weights, uncertainty = renderer(rays_train, tensorf, chunk=args.batch_size,
@@ -210,6 +212,15 @@ def reconstruction(args):
         # print(rgb_map.size()) # [batch size * 3]
         loss = torch.mean((rgb_map - rgb_train) ** 2)
 
+
+        if not (iteration % 10000):
+            plot_rgb = rgb_train.reshape(16, 16, 3).cpu().detach()
+            plt.imshow(plot_rgb)
+            plt.show()
+        if not (iteration % 10000):
+            plot_rgb = rgb_map.reshape(16, 16, 3).cpu().detach()
+            plt.imshow(plot_rgb)
+            plt.show()
 
         # loss
         total_loss = loss
@@ -277,10 +288,10 @@ def reconstruction(args):
                 print("continuing L1_reg_weight", L1_reg_weight)
 
 
-            if not args.ndc_ray and iteration == update_AlphaMask_list[1]:
-                # filter rays outside the bbox
-                allrays,allrgbs = tensorf.filtering_rays(allrays,allrgbs)
-                trainingSampler = GridSampler(allrgbs.shape[0], args.batch_size, dilated)
+            # if not args.ndc_ray and iteration == update_AlphaMask_list[1]:
+            #     # filter rays outside the bbox
+            #     allrays,allrgbs = tensorf.filtering_rays(allrays,allrgbs)
+            #     trainingSampler = GridSampler(allrgbs.shape[0], args.batch_size, dilated)
 
 
         if iteration in upsamp_list:
