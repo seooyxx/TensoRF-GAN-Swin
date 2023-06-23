@@ -1,0 +1,5 @@
+Collecting lxml
+  Downloading lxml-4.9.2-cp38-cp38-win_amd64.whl (3.9 MB)
+     ---------------------------------------- 3.9/3.9 MB 4.6 MB/s eta 0:00:00
+Installing collected packages: lxml
+Successfully installed lxml-4.9.2
