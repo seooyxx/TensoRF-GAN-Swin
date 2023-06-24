@@ -1,5 +1,6 @@
-
 import os
+os.environ['KMP_DUPLICATE_LIB_OK']='True'
+
 from tqdm.auto import tqdm
 from opt import config_parser
 
@@ -9,10 +10,10 @@ from renderer import *
 from utils import *
 from torch.utils.tensorboard import SummaryWriter
 import datetime
+import matplotlib.pyplot as plt
 
 from dataLoader import dataset_dict
 import sys
-
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -200,18 +201,15 @@ def reconstruction(args):
     pbar = tqdm(range(args.n_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
     for iteration in pbar:
         ray_idx = trainingSampler.nextids()
-        # print(ray_idx)
+        #print(ray_idx)
         # print(ray_idx.shape)
         rays_train, rgb_train = allrays[ray_idx], allrgbs[ray_idx].to(device)
-
-        import matplotlib.pyplot as plt
 
         #rgb_map, alphas_map, depth_map, weights, uncertainty
         rgb_map, alphas_map, depth_map, weights, uncertainty = renderer(rays_train, tensorf, chunk=args.batch_size,
                                 N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray, device=device, is_train=True)
         # print(rgb_map.size()) # [batch size * 3]
         loss = torch.mean((rgb_map - rgb_train) ** 2)
-
 
         if not (iteration % 10000):
             plot_rgb = rgb_train.reshape(16, 16, 3).cpu().detach()
@@ -228,6 +226,7 @@ def reconstruction(args):
             loss_reg = tensorf.vector_comp_diffs()
             total_loss += Ortho_reg_weight*loss_reg
             summary_writer.add_scalar('train/reg', loss_reg.detach().item(), global_step=iteration)
+            
         if L1_reg_weight > 0:
             loss_reg_L1 = tensorf.density_L1()
             total_loss += L1_reg_weight*loss_reg_L1
@@ -238,16 +237,22 @@ def reconstruction(args):
             loss_tv = tensorf.TV_loss_density(tvreg) * TV_weight_density
             total_loss = total_loss + loss_tv
             summary_writer.add_scalar('train/reg_tv_density', loss_tv.detach().item(), global_step=iteration)
+            
         if TV_weight_app>0:
             TV_weight_app *= lr_factor
             loss_tv = tensorf.TV_loss_app(tvreg)*TV_weight_app
             total_loss = total_loss + loss_tv
             summary_writer.add_scalar('train/reg_tv_app', loss_tv.detach().item(), global_step=iteration)
+            
+        # GAN Loss :TensoRF as Generator and Swin Transformer as Discriminator
+        
+
 
         optimizer.zero_grad()
         total_loss.backward()
-        optimizer.step()
-
+        optimizer.step()                    
+        
+        
         loss = loss.detach().item()
         
         PSNRs.append(-10.0 * np.log(loss) / np.log(10.0))
@@ -255,10 +260,11 @@ def reconstruction(args):
         summary_writer.add_scalar('train/mse', loss, global_step=iteration)
 
 
+        
         for param_group in optimizer.param_groups:
             param_group['lr'] = param_group['lr'] * lr_factor
 
-        # Print the current values of the losses.
+        # Print the current values of the losses.        
         if iteration % args.progress_refresh_rate == 0:
             pbar.set_description(
                 f'Iteration {iteration:05d}:'
@@ -274,8 +280,7 @@ def reconstruction(args):
                                     prtx=f'{iteration:06d}_', N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray, compute_extra_metrics=False)
             summary_writer.add_scalar('test/psnr', np.mean(PSNRs_test), global_step=iteration)
 
-
-
+        
         if iteration in update_AlphaMask_list:
 
             if reso_cur[0] * reso_cur[1] * reso_cur[2]<256**3:# update volume resolution
@@ -292,7 +297,6 @@ def reconstruction(args):
             #     # filter rays outside the bbox
             #     allrays,allrgbs = tensorf.filtering_rays(allrays,allrgbs)
             #     trainingSampler = GridSampler(allrgbs.shape[0], args.batch_size, dilated)
-
 
         if iteration in upsamp_list:
             n_voxels = N_voxel_list.pop(0)
@@ -351,4 +355,3 @@ if __name__ == '__main__':
         render_test(args)
     else:
         reconstruction(args)
-
